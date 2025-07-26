@@ -1,0 +1,5 @@
+canopen==2.3.0
+cantools==40.2.3
+openpyxl==3.1.5
+pandas==2.3.1
+python_can==4.5.0
