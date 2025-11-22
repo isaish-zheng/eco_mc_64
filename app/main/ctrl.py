@@ -26,13 +26,15 @@ from tkinter import END, filedialog
 import can
 import canopen
 import cantools
+import ctypes
 import openpyxl
 import pandas as pd
 from can.interfaces.pcan import PcanBus
 
+from utils import is_float, clear_queue, ms2dhms
 from .model import MainModel, ServiceDataObject, CanopenDataType, CandbItem
 from .view import tk, ttk, MainView, CanopenView, CandbView, TkTreeView, \
-    SubPropertyView, SubCalibrateValueView
+    SubPropertyView, SubCalibrateValueView, SubCalibrateTimeView
 
 
 ##############################
@@ -76,11 +78,11 @@ class MessageListener(can.Listener):
 
         candb_msg = self.candb.get_message_by_frame_id(msg.arbitration_id)
         decoded_raw_res = candb_msg.decode_simple(data=msg.data,
-                                                decode_choices=False,
-                                                scaling=False)
+                                                  decode_choices=False,
+                                                  scaling=False)
         decoded_scaled_res = candb_msg.decode_simple(data=msg.data,
-                                                   decode_choices=False,
-                                                   scaling=True)
+                                                     decode_choices=False,
+                                                     scaling=True)
 
         # 筛选数据项，filter返回的是浅拷贝的迭代器，每次迭代的元素内容指向对应原始数据项的内容
         filter_items = filter(lambda item:
@@ -213,7 +215,7 @@ class MainCtrl(object):
                 conf.set(conf_section, 'canopen_node_id', '0x7C')
                 conf.set(conf_section, 'canopen_max_retries', '1')
                 conf.set(conf_section, 'canopen_pause_before_send', '0.0')
-                conf.set(conf_section, 'canopen_response_timeout', '1.0')
+                conf.set(conf_section, 'canopen_response_timeout', '3.0')
                 conf.set(conf_section, 'canopen_retry_delay', '0.1')
                 conf.set(conf_section, 'canopen_opened_filepath', '')
 
@@ -425,12 +427,14 @@ class MainCtrl(object):
                     )
                 else:
                     data_bit = str(row['数据位（bit）']).strip().upper().replace("BIT", "")
-                    if data_bit.isdigit():
+                    if is_float(data_bit):
                         data_bit = int(data_bit)
                     factor = str(row['分辨率']).strip()
-                    factor = factor.isdigit() and float(factor) or None
+                    if is_float(factor):
+                        factor = float(factor)
                     offset = str(row['偏移量']).strip()
-                    offset = offset.isdigit() and float(offset) or None
+                    if is_float(offset):
+                        offset = float(offset)
                     do = ServiceDataObject(
                         id=idx,
                         name=str(row['功能名称']).strip(),
@@ -456,12 +460,17 @@ class MainCtrl(object):
             return do_list
 
         try:
+            # 加载GPS数据加密库
+            self.model.canopen_ed_dll = self.__get_ed_dll_gps(self.model.canopen_ed_dll_path)
+
+            # 清空队列
+            clear_queue(self.model.canopen_queue_for_gps)
+
             # 打开文件
             path = self.__open_file(filetype='canopen',
                              dir=os.path.dirname(self.model.canopen_opened_filepath))
             if not path:
                 return
-
             self.model.canopen_opened_filepath = path
 
             # 解析文件
@@ -634,7 +643,6 @@ class MainCtrl(object):
 
             if not paths:
                 return
-
             for path in paths:
                 self.model.candb_opened_filepath = path
                 # 解析文件
@@ -771,27 +779,22 @@ class MainCtrl(object):
                     do.value = 'Error'
                     self.__read_sdo(do)
                 except canopen.sdo.exceptions.SdoAbortedError as e:
+                    self.__show_value(do)
                     msg = f"失败: {e}"
                     self.text_log(msg, 'warning')
                     continue
                 except canopen.sdo.exceptions.SdoCommunicationError as e:
+                    self.__show_value(do)
                     msg = f"通讯错误: {e}"
                     self.text_log(msg, 'error')
                     return False
                 except Exception as e:
+                    self.__show_value(do)
                     self.text_log(f'发生异常 {e}', 'warning')
                     self.text_log(f"{traceback.format_exc()}", 'warning')
                     continue
+                self.__show_value(do)
 
-            # 显示所有sdo
-            # _table = self.__canopen_view.table # 数据表格
-            # _iids = _table.get_children() # 获取测量表格中所有的item_id列表
-            # _column_names = tuple(_table["columns"]) # 获取测量表格列名组成的元组
-            # for iid in _iids:
-            #     id = _table.item(iid, "values")[_column_names.index("ID")]
-            #     if id.isdigit():
-            #         value = self.model.canopen_sdos[int(id)].value
-            #         _table.set(iid, _column_names.index('Value'), value)
             return True
 
         def _refresh_selected_sdo() -> bool:
@@ -813,19 +816,22 @@ class MainCtrl(object):
                 try:
                     do.value = 'Error'
                     self.__read_sdo(do)
-                    # _table.set(iid, _column_names.index('Value'), do.value)
                 except canopen.sdo.exceptions.SdoAbortedError as e:
+                    _table.set(iid, _column_names.index('Value'), do.value)
                     msg = f"失败: {e}"
                     self.text_log(msg, 'warning')
                     continue
                 except canopen.sdo.exceptions.SdoCommunicationError as e:
+                    _table.set(iid, _column_names.index('Value'), do.value)
                     msg = f"通讯错误: {e}"
                     self.text_log(msg, 'error')
                     return False
                 except Exception as e:
+                    _table.set(iid, _column_names.index('Value'), do.value)
                     self.text_log(f'发生异常 {e}', 'warning')
                     self.text_log(f"{traceback.format_exc()}", 'warning')
                     continue
+                _table.set(iid, _column_names.index('Value'), do.value)
 
             return True
 
@@ -843,6 +849,13 @@ class MainCtrl(object):
                 self.text_log(f"{traceback.format_exc()}", 'error')
 
         try:
+            # 若未连接设备则退出
+            if not self.model.canopen_node:
+                msg = f"无效的节点"
+                self.text_log(msg, 'error')
+                self.view.show_warning(msg, self.__canopen_view)
+                return
+
             if target == 'selected':
                 # 刷新所选sdo
                 self.__pool_canopen.submit(_refresh_selected_sdo).add_done_callback(_done)
@@ -896,15 +909,32 @@ class MainCtrl(object):
                 return
             # 若未连接设备则退出
             if not self.model.canopen_node:
-                self.view.show_warning('请先刷新获取节点',
-                                       self.__canopen_view)
+                msg = f"无效的节点"
+                self.text_log(msg, 'error')
+                self.view.show_warning(msg, self.__canopen_view)
+                return
+            # 若权限不足则退出
+            if 'W' not in self.model.canopen_sdos[int(selected_id)].permission:
+                msg = f"访问权限不足, 拒绝写入"
+                self.text_log(msg, 'warning')
+                return
+            # 若数据为空则退出
+            if not self.model.canopen_sdos[int(selected_id)].data:
+                msg = f"请先刷新此对象获取数据"
+                self.text_log(msg, 'warning')
+                self.view.show_warning(msg, self.__canopen_view)
                 return
 
             # 显示输入框
-            SubCalibrateValueView(master=table,
-                                  do=self.model.canopen_sdos[int(selected_id)],
-                                  geometry=(x,y,w,h),
-                                  presenter=self)
+            if self.model.canopen_sdos[int(selected_id)].data_type == CanopenDataType.TIME:
+                SubCalibrateTimeView(master=self.__canopen_view,
+                                     do=self.model.canopen_sdos[int(selected_id)],
+                                     presenter=self)
+            else:
+                SubCalibrateValueView(master=table,
+                                      do=self.model.canopen_sdos[int(selected_id)],
+                                      geometry=(x,y,w,h),
+                                      presenter=self)
         except Exception as e:
             self.text_log(f'发生异常 {e}', 'error')
             self.text_log(f"{traceback.format_exc()}", 'error')
@@ -925,16 +955,51 @@ class MainCtrl(object):
                 # 验证是否为数值
                 try:
                     float(text)
-                except ValueError:
+                except (ValueError, TypeError):
                     widget.place_forget()
                     msg = f"变量{do.name}的值必须是数字"
                     self.text_log(msg, 'error')
                     self.view.show_warning(msg, self.__canopen_view)
                     return
             elif type(widget).__name__ == 'Combobox':  # 若控件为下拉选择框
-                pass
+                if text == 'False':
+                    text = '0'
+                elif text == 'True':
+                    text = '1'
+                else:
+                    widget.place_forget()
+                    msg = f"变量{do.name}的值必须是False或True"
+                    self.text_log(msg, 'error')
+                    self.view.show_warning(msg, self.__canopen_view)
+                    return
             widget.place_forget()  # 网格布局中移除编辑控件
             self.__write_sdo(do, text)
+        except Exception as e:
+            self.text_log(f'发生异常 {e}', 'error')
+            self.text_log(f"{traceback.format_exc()}", 'error')
+
+    def handler_on_calibrate_time(self, text: str, do: ServiceDataObject):
+        """
+        验证标定数据数据符合规则后，将数据写入sdo，并刷新数据及表格
+
+        :param text: 时间，字符串形式的数字，单位：毫秒
+        :type text: str
+        :param do: 服务数据对象
+        :type do: ServiceDataObject
+        """
+
+        try:
+            # 验证是否为数值
+            try:
+                float(text)
+            except (ValueError, TypeError):
+                msg = f"变量{do.name}的值必须是数字"
+                self.text_log(msg, 'error')
+                self.view.show_warning(msg, self.__canopen_view)
+                return
+            print(int(text))
+            self.__write_sdo(do, text)
+
         except Exception as e:
             self.text_log(f'发生异常 {e}', 'error')
             self.text_log(f"{traceback.format_exc()}", 'error')
@@ -1075,7 +1140,7 @@ class MainCtrl(object):
         self.model.can_notifier.add_listener(self.model.canopen_listener)
         self.text_log("添加canopen监听器")
 
-    def __get_can_params(self):
+    def __get_can_params(self) -> tuple[str, str, int]:
         """
         获取can总线参数
 
@@ -1097,6 +1162,67 @@ class MainCtrl(object):
 
         return bustype, channel, bitrate
 
+    def __show_value(self, do: ServiceDataObject) -> None:
+        """
+        将sdo对象中的value显示到表中
+
+        :param do: 服务数据对象
+        :type do: ServiceDataObject
+        """
+
+        _table = self.__canopen_view.table # 数据表格
+        _iids = [] # 数据项id列表
+        for group_id in self.model.canopen_group_iids:
+            _iids.append(group_id) # 添加分组数据项id
+            _iids.extend(_table.get_children(group_id)) # 添加组中数据项id
+        _column_names = tuple(_table["columns"]) # 获取测量表格列名组成的元组
+        _table.set(_iids[do.id], _column_names.index('Value'), do.value)
+
+    def __get_ed_dll_gps(self, dll_filepath: str) -> ctypes.CDLL | None:
+        """
+        加载GPS数据加密库并初始化
+
+        :param dll_filepath: 算法所在dll的文件路径
+        :type dll_filepath: str
+        :return: dll
+        :rtype: ctypes.CDLL
+        :raises LookupError: dll中不存在加密算法函数
+        """
+
+        dll = ctypes.windll.LoadLibrary(dll_filepath)
+        if hasattr(dll, 'XDEA2Init2') and hasattr(dll, 'XDEA2EncryptBlock2'):
+            size = len(self.model.canopen_key_for_gps)
+            key_data = (ctypes.c_char * size)(*self.model.canopen_key_for_gps)
+            dll.XDEA2Init2(ctypes.byref(key_data))
+            msg = f"已加载GPS数据加密库: {dll_filepath}"
+            self.text_log(msg)
+            return dll
+        else:
+            msg = f'{dll_filepath}中不存在XDEA2Init2或XDEA2EncryptBlock2函数'
+            raise LookupError(msg)
+
+    def __node_gps_res_callback(self, cob_id: int, data: bytearray, timestamp: float) -> None:
+        """
+        GPS节点响应的回调函数
+
+        :param cob_id: 帧ID
+        :type cob_id: int
+        :param data: 帧数据
+        :type data: bytearray
+        :param timestamp: 帧时间戳
+        :type timestamp: float
+        """
+
+        # 若响应帧ID与请求帧ID不对应则返回
+        if cob_id != int(self.model.canopen_node_id, 16) + 0x580 - 0x1:
+            return
+        # 若命令符不是43H(读4字节响应)或60H(写成功)则返回
+        cs = int(data[0])
+        if cs != 0x43 and cs != 0x60:
+            return
+        # 将数据放入队列
+        self.model.canopen_queue_for_gps.put(data)
+
     def __read_sdo(self, do: ServiceDataObject) -> str | None:
         """
         读取sdo，若成功，则修改do的data和value属性，并返回value值
@@ -1110,28 +1236,63 @@ class MainCtrl(object):
         if not do.data_type:
             return value
 
-        if not self.model.canopen_node:
-            msg = f"无效的节点"
-            self.text_log(msg, 'error')
-            return value
         node = self.model.canopen_node
 
         msg = f"读取sdo: {do.name}, 索引: {do.index}-{do.subindex}"
         self.text_log(msg)
 
-        data = node.sdo.upload(int(do.index, 16), int(do.subindex, 16))
+        # GPS索引为0x6520, 需加密处理
+        if do.index == '0x6520':
+            dll = self.model.canopen_ed_dll
+            if not dll:
+                msg = f"未加载GPS数据加密库"
+                self.text_log(msg, 'warning')
+                return value
+
+            index_bytes =  int(do.index, 16).to_bytes(2, 'little', signed=False)
+            subindex_bytes = int(do.subindex, 16).to_bytes(1, 'little', signed=False)
+            src = [0x40]
+            src.extend(index_bytes)
+            src.extend(subindex_bytes)
+            src.extend([0, 0, 0, 0])
+            src_data = (ctypes.c_char * len(src))(*src)
+            dest_data = (ctypes.c_char * len(src))()
+            dll.XDEA2EncryptBlock2(ctypes.byref(src_data), ctypes.byref(dest_data))
+            dest = [byte for byte in dest_data.value]
+
+            clear_queue(self.model.canopen_queue_for_gps)
+
+            self.model.canopen_network.send_message(int(self.model.canopen_node_id, 16) + 0x600 - 0x1 , bytes(dest))
+            self.model.canopen_network.subscribe(int(self.model.canopen_node_id, 16) + 0x580 - 0x1, self.__node_gps_res_callback)
+
+            try:
+                data = self.model.canopen_queue_for_gps.get(timeout=float(self.model.canopen_response_timeout))
+            except:
+                msg = f"超时"
+                self.text_log(msg, 'warning')
+                return value
+            if data[0] != 0x43 or data[1] != index_bytes[0] or data[2] != index_bytes[1]:
+                msg = f"失败"
+                self.text_log(msg, 'warning')
+                return value
+            data = data[4:]
+        else:
+            data = node.sdo.upload(int(do.index, 16), int(do.subindex, 16))
+
         do.data = data
         if do.data_type == CanopenDataType.BOOL:
-            data_byte = int(do.data_position.upper().replace('BYTE', '')) # 0基
-            data_bit = data_byte * 8 + do.data_bit
-            res = int.from_bytes(data[:do.data_type.size], 'little', signed=False)
+            data_byte_first = int(do.data_position.upper().replace('BYTE', '')[0]) # 0基
+            data_bit = do.data_bit
+            res = int.from_bytes(data[data_byte_first:data_byte_first+do.data_type.size], 'little', signed=False)
             value = bool((res >> data_bit) & 1)
             do.value = str(value)
         elif do.data_type == CanopenDataType.BYTE:
-            value = int.from_bytes(data[:do.data_type.size], 'little', signed=False)
+            data_byte_first = int(do.data_position.upper().replace('BYTE', '')[0]) # 0基
+            value = int.from_bytes(data[data_byte_first:data_byte_first+do.data_type.size], 'little', signed=False)
             do.value = str(value)
         elif do.data_type == CanopenDataType.WORD:
-            value = int.from_bytes(data[:do.data_type.size], 'little', signed=False)
+            data_byte_first = int(do.data_position.upper().replace('BYTE', '')[0]) # 0基
+            value = int.from_bytes(data[data_byte_first:data_byte_first+do.data_type.size], 'little', signed=False)
             do.value = str(value)
         elif do.data_type == CanopenDataType.DWORD:
             value = int.from_bytes(data[:do.data_type.size], 'little', signed=False)
@@ -1148,18 +1309,14 @@ class MainCtrl(object):
             value = f"{value: <{.6}f}"
             do.value = str(value)
         elif do.data_type == CanopenDataType.TIME:
+            value = int.from_bytes(data[:do.data_type.size], 'little', signed=False)
+            d, h, m, s, ms = ms2dhms(value)
+            do.value = f"{d}天{h}时{m}分{s}.{ms}秒"
+        else:
             raise TypeError(f"Invalid sdo data type {do.data_type}:{do.data_type.name}")
 
         msg = f"成功: 数据类型 {do.data_type.name}, 值 {do.value}"
         self.text_log(msg, 'done')
-
-        _table = self.__canopen_view.table # 数据表格
-        _iids = [] # 数据项id列表
-        for group_id in self.model.canopen_group_iids:
-            _iids.append(group_id) # 添加分组数据项id
-            _iids.extend(_table.get_children(group_id)) # 添加组中数据项id
-        _column_names = tuple(_table["columns"]) # 获取测量表格列名组成的元组
-        _table.set(_iids[do.id], _column_names.index('Value'), do.value)
 
         return str(value)
 
@@ -1202,72 +1359,150 @@ class MainCtrl(object):
             mask = 1 << bit_position
             return number | mask
 
-        if not do.data_type:
-            return
-        if not self.model.canopen_node:
-            msg = f"无效的节点"
-            self.text_log(msg, 'error')
-            return
-        node = self.model.canopen_node
+        def _write(do: ServiceDataObject, value: str) -> None:
+            if not do.data_type:
+                return
 
-        msg = f"写入sdo: {do.name}, 索引: {do.index}-{do.subindex}"
-        self.text_log(msg)
+            node = self.model.canopen_node
 
-        data = None
-        if do.data_type == CanopenDataType.BOOL:
-            value = int(value) == 1 and 1 or 0
-            data_byte = int(do.data_position.upper().replace('BYTE', '')) # 0基
-            data_bit = data_byte * 8 + do.data_bit
-            number = int.from_bytes(do.data[:do.data_type.size], 'little', signed=False)
-            if value:
-                v = _set_bit(number, data_bit)
+            msg = f"写入sdo: {do.name}, 索引: {do.index}-{do.subindex}"
+            self.text_log(msg)
+
+            # 读
+            try:
+                if not self.__read_sdo(do):
+                    return
+            except canopen.sdo.exceptions.SdoAbortedError as e:
+                self.__show_value(do)
+                msg = f"失败: {e}"
+                self.text_log(msg, 'warning')
+                return
+            except canopen.sdo.exceptions.SdoCommunicationError as e:
+                self.__show_value(do)
+                msg = f"通讯错误: {e}"
+                self.text_log(msg, 'error')
+                return
+            except Exception as e:
+                self.__show_value(do)
+                self.text_log(f'发生异常 {e}', 'warning')
+                self.text_log(f"{traceback.format_exc()}", 'warning')
+                return
+
+            self.__show_value(do)
+
+            # 改
+            data = None
+            if do.data_type == CanopenDataType.BOOL:
+                value = int(value) == 1 and 1 or 0
+                data_byte_first = int(do.data_position.upper().replace('BYTE', '')[0]) # 0基
+                data_bit = data_byte_first * 8 + do.data_bit
+                number = int.from_bytes(do.data, 'little', signed=False)
+                if value:
+                    v = _set_bit(number, data_bit)
+                else:
+                    v = _clear_bit(number, data_bit)
+                data = v.to_bytes(4, 'little', signed=False)
+            elif do.data_type == CanopenDataType.BYTE or do.data_type == CanopenDataType.WORD:
+                value = int(value) > 0 and int(value) or 0
+                data_byte_first = int(do.data_position.upper().replace('BYTE', '')[0]) # 0基
+                data = bytearray(do.data)
+                data[data_byte_first:data_byte_first+do.data_type.size] = value.to_bytes(do.data_type.size, 'little', signed=False)
+            elif do.data_type == CanopenDataType.DWORD:
+                value = int(value) > 0 and int(value) or 0
+                data = value.to_bytes(4, 'little', signed=False)
+            elif do.data_type == CanopenDataType.INT:
+                value = int(value)
+                data = value.to_bytes(4, 'little', signed=True)
+            elif do.data_type == CanopenDataType.REAL:
+                # 对于32位浮点数，使用'f'；
+                # 对于64位浮点数，使用'd'。
+                # 如果bytes表示的是大端序，可以使用'!'作为格式字符串的前缀来指定字节顺序。
+                value = float(value)
+                data = pack('f', value)
+            elif do.data_type == CanopenDataType.TIME:
+                value = int(value) > 0 and int(value) or 0
+                data = value.to_bytes(4, 'little', signed=False)
             else:
-                v = _clear_bit(number, data_bit)
-            data = v.to_bytes(4, 'little', signed=False)
-        elif do.data_type == CanopenDataType.BYTE:
-            value = int(value) > 0 and int(value) or 0
-            data = value.to_bytes(4, 'little', signed=False)
-        elif do.data_type == CanopenDataType.WORD:
-            value = int(value) > 0 and int(value) or 0
-            data = value.to_bytes(4, 'little', signed=False)
-        elif do.data_type == CanopenDataType.DWORD:
-            value = int(value) > 0 and int(value) or 0
-            data = value.to_bytes(4, 'little', signed=False)
-        elif do.data_type == CanopenDataType.INT:
-            value = int(value)
-            data = value.to_bytes(4, 'little', signed=True)
-        elif do.data_type == CanopenDataType.REAL:
-            # 对于32位浮点数，使用'f'；
-            # 对于64位浮点数，使用'd'。
-            # 如果bytes表示的是大端序，可以使用'!'作为格式字符串的前缀来指定字节顺序。
-            value = float(value)
-            data = pack('f', value)
-        elif do.data_type == CanopenDataType.TIME:
-            raise TypeError(f"Invalid sdo data type {do.data_type}:{do.data_type.name}")
+                raise TypeError(f"Invalid sdo data type {do.data_type}:{do.data_type.name}")
 
-        msg = (f"写入信息:"
-               f"\n\t物理值->{do.value},"
-               f"\n\t原始值->0x{do.data.hex()},"
-               f"\n\t标定物理值->{value},"
-               f"\n\t标定原始值->0x{data.hex()},"
-               f"\n\t数据类型->{do.data_type}")
-        self.text_log(msg)
+            msg = (f"写入信息:"
+                   f"\n\t物理值->{do.value},"
+                   f"\n\t原始值->0x{do.data.hex()},"
+                   f"\n\t标定物理值->{value},"
+                   f"\n\t标定原始值->0x{data.hex()},"
+                   f"\n\t数据类型->{do.data_type}")
+            self.text_log(msg)
 
-        if do.data == data:
-            self.text_log(f'标定值未变化，无需修改', 'warning')
-            return
+            if do.data == bytes(data):
+                self.text_log(f'标定值未变化，无需修改', 'warning')
+                return
 
-        node.sdo.download(int(do.index, 16), int(do.subindex, 16), data)
+            # 写
+            # GPS索引为0x6520, 需加密处理
+            if do.index == '0x6520':
+                dll = self.model.canopen_ed_dll
+                if not dll:
+                    msg = f"未加载GPS数据加密库"
+                    self.text_log(msg, 'warning')
+                    return
 
-        # 更新显示sdo
-        self.__read_sdo(do)
-        # _table = self.__canopen_view.table # 数据表格
-        # _iids = _table.get_children() # 获取测量表格中所有的item_id列表
-        # _column_names = tuple(_table["columns"]) # 获取测量表格列名组成的元组
-        # _table.set(_iids[do.id], _column_names.index('Value'), do.value)
+                index_bytes =  int(do.index, 16).to_bytes(2, 'little', signed=False)
+                subindex_bytes = int(do.subindex, 16).to_bytes(1, 'little', signed=False)
+                src = [0x23]
+                src.extend(index_bytes)
+                src.extend(subindex_bytes)
+                src.extend(bytes(data))
+                src_data = (ctypes.c_char * len(src))(*src)
+                dest_data = (ctypes.c_char * len(src))()
+                dll.XDEA2EncryptBlock2(ctypes.byref(src_data), ctypes.byref(dest_data))
+                dest = [byte for byte in dest_data.value]
 
-        msg = f"写入sdo成功: 值已改为 {do.value}"
-        self.text_log(msg, 'done')
+                clear_queue(self.model.canopen_queue_for_gps)
+
+                self.model.canopen_network.send_message(int(self.model.canopen_node_id, 16) + 0x600 - 0x1 , bytes(dest))
+                self.model.canopen_network.subscribe(int(self.model.canopen_node_id, 16) + 0x580 - 0x1, self.__node_gps_res_callback)
+
+                try:
+                    data = self.model.canopen_queue_for_gps.get(timeout=float(self.model.canopen_response_timeout))
+                except:
+                    msg = f"超时"
+                    self.text_log(msg, 'warning')
+                    self.__read_sdo(do)
+                    self.__show_value(do)
+                    return
+                if data[0] != 0x60 or data[1] != index_bytes[0] or data[2] != index_bytes[1]:
+                    msg = f"失败"
+                    self.text_log(msg, 'warning')
+                    self.__read_sdo(do)
+                    self.__show_value(do)
+                    return
+            else:
+                node.sdo.download(int(do.index, 16), int(do.subindex, 16), bytes(data))
+
+            # 更新显示sdo
+            self.__read_sdo(do)
+            self.__show_value(do)
+            msg = f"写入sdo成功: 值已改为 {do.value}"
+            self.text_log(msg, 'done')
+
+        def _done(future):
+            """
+            结束
+
+            :param future: 任务执行结束返回的future对象
+            """
+            try:
+                if future.exception():
+                    raise Exception(future.exception())
+            except Exception as e:
+                self.text_log(f'发生异常 {e}', 'error')
+                self.text_log(f"{traceback.format_exc()}", 'error')
+
+        try:
+            self.__pool_canopen.submit(_write, *(do, value)).add_done_callback(_done)
+        except Exception as e:
+            self.text_log(f'发生异常 {e}', 'error')
+            self.text_log(f"{traceback.format_exc()}", 'error')
 
     def __display_candb_value(self, basename: str) -> None:
         """
@@ -1452,3 +1687,4 @@ class MainCtrl(object):
         """
         basename = os.path.basename(filepath)
         return os.path.splitext(basename)[0], os.path.splitext(basename)[1]
+

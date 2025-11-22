@@ -1,5 +1,6 @@
 > # 产品信息
 > ## Eco MC
+> ![pic_main](.\docs\images\main.png)
 
 
 > # 本产品包含以下内容
@@ -24,9 +25,10 @@
 > ## 外部依赖（建议使用项目提供的文件）
 > 1. 安装PCAN驱动程序 [PEAK-System_Driver下载](https://peak-system.com.cn/wp-content/uploads/2025/07/PEAK-System_Driver-Setup.zip)
 > 2. 将.dll文件按照如下路径放置
+>    * docs\LIB\libed.dll --> Eco MC.exe同级路径
 >    * For x64 Windows systems [PCAN-Basic API下载](https://peak-system.com.cn/wp-content/uploads/2025/07/PCAN-Basic.zip)
->      - PCAN-Basic\x86\PCANBasic.dll --> C:\Windows\SysWOW64
->      - PCAN-Basic\x64\PCANBasic.dll --> C:\Windows\System32
+>      - docs\LIB\PCAN-Basic\x86\PCANBasic.dll --> C:\Windows\SysWOW64
+>      - docs\LIB\PCAN-Basic\x64\PCANBasic.dll --> C:\Windows\System32
 > ## 打包方式
 > **PyInstaller**
 > * 安装pyinstaller模块
@@ -37,9 +39,9 @@
 >   `pyinstaller main.py -F -w -i .\icons\Z.ico -n "Eco MC"`
 > 
 > ## 运行exe
-> * 以管理员身份运行.exe
+> * 以管理员身份运行.exe文件
 > 
-> ### 使用
+> ## 使用
 > 1. 打开设备
 > 2. 打开文件
 > 3. 进行操作

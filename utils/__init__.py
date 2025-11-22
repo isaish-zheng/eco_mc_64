@@ -6,6 +6,7 @@
 # @function:
 
 
-from .data_process import pad_hex, get_c_char, reverse32
+from .data_process import pad_hex, get_c_char, reverse32, is_integer, is_hex, is_float, clear_queue, \
+    ms2dhms
 from .my_crc32 import Crc32Bzip2
 from .my_decorator import singleton

@@ -23,7 +23,8 @@ from tkui.tktypes import tk, ttk, GetDpiMixIn, messagebox, \
     WIDTH_LABEL, WIDTH_BUTTON, WIDTH_ROOT_WINDOW, WIDTH_COMBOBOX, WIDTH_ENTRY, \
     HEIGHT_BUTTON, HEIGHT_ENTRY, HEIGHT_ROOT_WINDOW, HEIGHT_WINDOW_MENU_BAR, \
     HEIGHT_LABEL, HEIGHT_COMBOBOX, WIDTH_SCROLLER_BAR
-from .model import MainModel, ServiceDataObject
+from utils import ms2dhms
+from .model import MainModel, ServiceDataObject, CanopenDataType
 
 
 ##############################
@@ -259,6 +260,180 @@ class SubPropertyView(tk.Toplevel, GetDpiMixIn):
                                                )
 
 
+class SubCalibrateTimeView(tk.Toplevel, GetDpiMixIn):
+    """
+    时间标定界面
+
+    :param master: 父窗口
+    :type master: tk.Tk | tk.Toplevel
+    :param block_calibrate_dict: 数组标定对象
+    :type block_calibrate_dict: dict[str, ASAP2Calibrate]
+    :param presenter: presenter中含一系列方法，用于处理界面事件
+    :type presenter: Any
+    """
+
+    def __init__(self,
+                 master: tk.Tk | tk.Toplevel,
+                 do: ServiceDataObject,
+                 presenter: Any
+                 ) -> None:
+        """构造函数"""
+        # 操作系统使用程序自身的dpi适配
+        ctypes.windll.shcore.SetProcessDpiAwareness(1)
+        super().__init__(master=master)
+
+        self.master = master
+        self.do = do
+        self.presenter = presenter
+
+        self.__WIN_WIDTH = 190
+        self.__WIN_HEIGHT = 135
+
+        self.set_root()
+        # 子窗口捕捉所有事件
+        self.grab_set()
+        self.transient(master)
+
+        self.set_calibrate_frame()
+
+    def __del__(self):
+        """
+        析构函数，窗口销毁
+
+        """
+        self.destroy()
+
+    def set_root(self) -> None:
+        """
+        设置根窗口
+
+        """
+        # 窗口标题
+        self.title('Time')
+        # 窗口尺寸和位置
+        x_pos = int(self.master.winfo_rootx() + (self.master.winfo_width()- super().get_dpi(self.__WIN_WIDTH)) / 2)
+        y_pos = int(self.master.winfo_rooty() + (self.master.winfo_height() - super().get_dpi(self.__WIN_HEIGHT)) /2)
+        self.geometry(
+            f"{super().get_dpi(self.__WIN_WIDTH)}x"
+            f"{super().get_dpi(self.__WIN_HEIGHT)}"
+            f"+{x_pos}+{y_pos}")
+        self.resizable(width=False, height=False) # 窗口大小可变
+        self.wm_attributes("-topmost", 1)  # 置顶
+        # 窗口点击关闭触发的功能
+        self.protocol('WM_DELETE_WINDOW', lambda: self.__del__())
+        with open('tmp.ico', 'wb') as tmp:
+            tmp.write(base64.b64decode(icon.img))
+        self.iconbitmap('tmp.ico')
+        os.remove('tmp.ico')
+
+    def set_calibrate_frame(self):
+        """
+        设置标定时间项界面
+
+        """
+
+        def _validate_input(char: str) -> bool:
+            """
+            输入验证，仅允许输入大于零的整数
+
+            """
+            return char.isdigit() or char == ""  # 允许数字和退格
+
+        # 注册验证命令
+        vcmd = (self.register(_validate_input), '%S')
+
+        do = self.do
+        value = int.from_bytes(do.data[:do.data_type.size], 'little', signed=False)
+        d, h, m, s, ms = ms2dhms(value)
+
+        days_var = tk.StringVar(value=str(d))
+        hours_var = tk.StringVar(value=str(h))
+        minutes_var = tk.StringVar(value=str(m))
+        seconds_var = tk.StringVar(value=str(s))
+
+        label_width = 20
+        entry_width = 80
+        # Frame
+        frame = TkFrame(master=self,
+                        bg=COLOR_FRAME_BG, borderwidth=0,
+                        x=0, y=0,
+                        width=self.__WIN_WIDTH, height=self.__WIN_HEIGHT)
+        # 天
+        TkLabel(master=frame,
+                bg=COLOR_FRAME_BG, fg='black',
+                borderwidth=0,
+                relief="sunken", justify='left', anchor='w',
+                text="天：", font=FONT_BUTTON,
+                x=10, y=10, width=label_width, height=HEIGHT_ENTRY)
+        TkEntry(master=frame,
+                bg=COLOR_FRAME_BG, fg='black',
+                borderwidth=1,
+                font=FONT_BUTTON,
+                textvariable=days_var,
+                relief="sunken", justify='left',
+                validate="key", validatecommand=vcmd,
+                x=30, y=10, width=entry_width, height=HEIGHT_ENTRY)
+        # 时
+        TkLabel(master=frame,
+                bg=COLOR_FRAME_BG, fg='black',
+                borderwidth=0,
+                relief="sunken", justify='left', anchor='w',
+                text="时：", font=FONT_BUTTON,
+                x=10, y=40, width=label_width, height=HEIGHT_ENTRY)
+        TkEntry(master=frame,
+                bg=COLOR_FRAME_BG, fg='black',
+                borderwidth=1,
+                font=FONT_BUTTON,
+                textvariable=hours_var,
+                relief="sunken", justify='left',
+                validate="key", validatecommand=vcmd,
+                x=30, y=40, width=entry_width, height=HEIGHT_ENTRY)
+        # 分
+        TkLabel(master=frame,
+                bg=COLOR_FRAME_BG, fg='black',
+                borderwidth=0,
+                relief="sunken", justify='left', anchor='w',
+                text="分：", font=FONT_BUTTON,
+                x=10, y=70, width=label_width, height=HEIGHT_ENTRY)
+        TkEntry(master=frame,
+                bg=COLOR_FRAME_BG, fg='black',
+                borderwidth=1,
+                font=FONT_BUTTON,
+                textvariable=minutes_var,
+                relief="sunken", justify='left',
+                validate="key", validatecommand=vcmd,
+                x=30, y=70, width=entry_width, height=HEIGHT_ENTRY)
+        # 秒
+        TkLabel(master=frame,
+                bg=COLOR_FRAME_BG, fg='black',
+                borderwidth=0,
+                relief="sunken", justify='left', anchor='w',
+                text="秒：", font=FONT_BUTTON,
+                x=10, y=100, width=label_width, height=HEIGHT_ENTRY)
+        TkEntry(master=frame,
+                bg=COLOR_FRAME_BG, fg='black',
+                borderwidth=1,
+                font=FONT_BUTTON,
+                textvariable=seconds_var,
+                relief="sunken", justify='left',
+                validate="key", validatecommand=vcmd,
+                x=30, y=100, width=entry_width, height=HEIGHT_ENTRY)
+        # 按钮_确定
+        TkButton(
+            master=frame,
+            bg=COLOR_BUTTON_BG, fg=COLOR_BUTTON_FG,
+            activebackground=COLOR_BUTTON_ACTIVE_BG, activeforeground=COLOR_BUTTON_ACTIVE_FG,
+            borderwidth=0,
+            text="确定", font=FONT_BUTTON,
+            command=lambda: (self.__del__(),
+                             self.presenter.handler_on_calibrate_time(
+                                 (int(days_var.get()) * 86400 + int(hours_var.get()) * 3600 + int(
+                                     minutes_var.get()) * 60 + int(seconds_var.get())) * 1000, do)),
+            x=120, y=50, width=60, height=HEIGHT_BUTTON,
+            state='normal'
+        )
+
+
 class SubCalibrateValueView(GetDpiMixIn):
     """
     VALUE类型标定对象输入框
@@ -275,7 +450,7 @@ class SubCalibrateValueView(GetDpiMixIn):
 
     def __init__(self,
                  master: TkTreeView | ttk.Treeview,
-                 do:  ServiceDataObject,
+                 do: ServiceDataObject,
                  geometry: tuple[int, int, int, int],
                  presenter: Any):
         """构造函数"""
@@ -299,18 +474,37 @@ class SubCalibrateValueView(GetDpiMixIn):
         设置输入框
 
         """
+
+        data_type = self.do.data_type
+
         # 创建内容编辑变量，设置内容编辑变量的初始值
-        self.edit_var = tk.StringVar(value=self.do.value.strip())
-        # 标量，普通数值
-        self.edit_widget = tk.Entry(self.master,
-                                    font=FONT_BUTTON,
-                                    textvariable=self.edit_var,
-                                    width=self.width // 11,
-                                    relief=tk.SOLID,
-                                    borderwidth=1,
-                                    justify=tk.LEFT)
-        self.edit_widget.bind('<FocusOut>',
-                              lambda e: self.presenter.handler_on_calibrate_value(self.edit_widget, self.do))
+        self.edit_var = tk.StringVar(value=str(self.do.value).strip())
+
+        # 根据选择的列和数据项属性，进行不同的处理
+        if data_type == CanopenDataType.BOOL:
+            # 标量，数值映射
+            self.edit_widget = ttk.Combobox(self.master,
+                                            font=FONT_BUTTON,
+                                            textvariable=self.edit_var,
+                                            width=self.width // 11,
+                                            state='readonly',
+                                            values=('False', 'True'),
+                                            justify=tk.LEFT)
+            self.edit_widget.bind('<<ComboboxSelected>>',
+                                  lambda e: self.presenter.handler_on_calibrate_value(self.edit_widget, self.do))
+            self.edit_widget.bind('<FocusOut>', lambda e: self.leave())
+        else:
+            # 标量，普通数值
+            self.edit_widget = tk.Entry(self.master,
+                                        font=FONT_BUTTON,
+                                        textvariable=self.edit_var,
+                                        width=self.width // 11,
+                                        relief=tk.SOLID,
+                                        borderwidth=1,
+                                        justify=tk.LEFT)
+            self.edit_widget.bind('<FocusOut>',
+                                  lambda e: self.presenter.handler_on_calibrate_value(self.edit_widget, self.do))
+
         # 将widget放到self.table_calibrate的单元格中
         self.edit_widget.place(x=self.x, y=self.y, width=self.width, height=self.height)
         self.edit_widget.focus()
@@ -568,7 +762,7 @@ class MainView(tk.Tk, GetDpiMixIn):
 
         """
         msg = ('产品信息: \n'
-               '    Eco MC V2025.1.0\n'
+               '    Eco MC V2025.1.1\n'
                '    Author: ZYD')
         messagebox.showinfo(parent=self, title='关于', message=msg)
 
@@ -691,8 +885,8 @@ class CanopenView(tk.Toplevel, GetDpiMixIn):
         self.table["columns"] = ("ID", "Name", "Value", "Unit", "Type", "RW")
         self.table.column("#0", anchor='w', width=super().get_dpi(160))  # 表示列,不显示
         self.table.column("ID", anchor='w', width=super().get_dpi(40))  # 表示列,不显示
-        self.table.column("Name", anchor='w', width=super().get_dpi(254))
-        self.table.column("Value", anchor='w', width=super().get_dpi(115))
+        self.table.column("Name", anchor='w', width=super().get_dpi(234))
+        self.table.column("Value", anchor='w', width=super().get_dpi(135))
         self.table.column("Unit", anchor='w', width=super().get_dpi(65))
         self.table.column("Type", anchor='w', width=super().get_dpi(65))
         self.table.column("RW", anchor='w', width=super().get_dpi(70))

@@ -6,13 +6,12 @@
 
 /*
 !app/
+!docs/
 !icons/
-!PCAN-Basic/
 !tkui/
 !utils/
 !/.gitignore
 !/README.md
 !/main.py
-!/PCAN驱动安装说明.txt
 !/requirements.txt
 

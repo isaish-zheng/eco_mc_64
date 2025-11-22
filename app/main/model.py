@@ -22,6 +22,7 @@ from tkinter import StringVar
 import can
 import canopen
 import cantools.database
+import ctypes
 
 
 ##############################
@@ -261,6 +262,11 @@ class MainModel(object):
         self.canopen_node: canopen.RemoteNode | None = None # canopen节点
         self.canopen_sdos: list[ServiceDataObject] = [] # canopen服务数据对象列表
         self.canopen_group_iids: list[str] = [] # canopen表格分组数据项id列表
+        self.canopen_ed_dll_path: str = './libed.dll' # 数据加密库路径
+        self.canopen_ed_dll: ctypes.CDLL | None = None # 数据加密库
+        self.canopen_queue_for_gps: Queue = Queue(1)  # 针对GPS节点的响应数据队列(node_id=0x7B)
+        self.canopen_key_for_gps: list[int] = [0x31, 0x32, 0x33, 0x34, 0x35, 0x36, 0x37, 0x38] # 数据加密的key(challenges)
+
 
         self.candb_opened_filepath: str = '' # 打开的candb文件完整路径
 

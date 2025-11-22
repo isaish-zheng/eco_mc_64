@@ -12,6 +12,7 @@
 
 import ctypes
 import sys
+from queue import Queue
 from typing import Any
 
 
@@ -65,3 +66,80 @@ def reverse32(v: int) -> Any:
     res[1] = get_c_char((v >> 16) & 0x000000FF)
     res[0] = get_c_char((v >> 24) & 0x000000FF)
     return res
+
+
+def is_integer(s: str) -> bool:
+    """
+    判断字符串是否为整型
+
+    :param s: 字符串
+    :type s: str
+    :return: true or false
+    :rtype: bool
+    """
+    try:
+        int(s)
+        return True
+    except (ValueError, TypeError):
+        return False
+
+def is_hex(s: str) -> bool:
+    """
+    判断字符串是否为16进制整型
+
+    :param s: 字符串
+    :type s: str
+    :return: true or false
+    :rtype: bool
+    """
+    try:
+        int(s, 16)
+        return True
+    except (ValueError, TypeError):
+        return False
+
+
+def is_float(s):
+    """
+    判断字符串是否为浮点型
+
+    :param s: 字符串
+    :type s: str
+    :return: true or false
+    :rtype: bool
+    """
+    try:
+        float(s)
+        return True
+    except (ValueError, TypeError):
+        return False
+
+
+def clear_queue(q: Queue) -> None:
+    """
+    清空队列
+
+    :param q: 队列
+    :type q: Queue
+    """
+
+    while not q.empty():
+        try:
+            q.get_nowait()
+        except:
+            break
+
+def ms2dhms(ms: int) -> tuple[int, int, int, int, int]:
+    """
+    将毫秒转换为天、小时、分钟、秒、剩余毫秒
+
+    :param ms: 毫秒数
+    :return: (天, 小时, 分钟, 秒, 剩余毫秒)
+    :rtype: tuple(int, int, int, int, int)
+    """
+
+    s, ms = divmod(ms, 1000)
+    m, s = divmod(s, 60)
+    h, m = divmod(m, 60)
+    d, h = divmod(h, 24)
+    return d, h, m, s, ms

@@ -265,6 +265,8 @@ class TkEntry(tk.Entry, GetDpiMixIn):
         textvariable = kwargs.get('textvariable', None)
         relief = kwargs.get('relief', 'sunken')
         justify = kwargs.get('justify', 'left')
+        validate=kwargs.get('validate', 'none')
+        validatecommand=kwargs.get('validatecommand', '')
 
         x = super().get_dpi(kwargs.get('x', 0))
         y = super().get_dpi(kwargs.get('y', 0))
@@ -275,7 +277,9 @@ class TkEntry(tk.Entry, GetDpiMixIn):
                          borderwidth=borderwidth,
                          font=font,
                          textvariable=textvariable,
-                         relief=relief, justify=justify)
+                         relief=relief, justify=justify,
+                         validate = validate,
+                         validatecommand = validatecommand)
         self.place(x=x, y=y, width=width, height=height)
         self.bind("<Leave>", lambda e: master.focus_set())
 
