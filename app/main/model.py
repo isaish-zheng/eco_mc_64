@@ -60,11 +60,11 @@ class CanopenDataType(Enum):
         Raises:
             TypeError: 无效类型
         """
-        if self.name in ("BYTE",):
+        if self.name in ("BOOL","BYTE"):
             return 1
         elif self.name in ("WORD",):
             return 2
-        elif self.name in ("BOOL", "DWORD", "INT", "REAL", "TIME"):
+        elif self.name in ("DWORD", "INT", "REAL", "TIME"):
             return 4
         raise TypeError(f"Invalid input type in {self.__class__.__name__}: {self.name}")
 

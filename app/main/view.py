@@ -762,7 +762,7 @@ class MainView(tk.Tk, GetDpiMixIn):
 
         """
         msg = ('产品信息: \n'
-               '    Eco MC V2025.1.1\n'
+               '    Eco MC V2026.0.1\n'
                '    Author: ZYD')
         messagebox.showinfo(parent=self, title='关于', message=msg)
 

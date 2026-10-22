@@ -12,8 +12,8 @@ Eco MC 是一款专为 Windows 系统设计的 CAN 总线监控和标定工具�
 
 ## 系统要求
 - **操作系统**：Windows 10 及以上版本 (x64)
-- **Python 版本 (64 位)**：建议使用 Python 3.11.9  
-  [Python 解释器下载链接](https://www.python.org/ftp/python/3.11.9/python-3.11.9-amd64.exe)
+- **Python 版本 (64 位)**：建议使用 Python 3.12.10  
+  [Python 解释器下载链接](https://www.python.org/ftp/python/3.12.10/python-3.12.10.exe)
 
 ---
 
